@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { checkIns } from "db/schema";
+import { checkIns } from "../db/schema";
 import { eq, desc } from "drizzle-orm";
 
 function formatInterval(ms: number): string {

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { timers } from "db/schema";
+import { timers } from "../db/schema";
 import { eq } from "drizzle-orm";
 
 export const timerRouter = createRouter({
