@@ -1,9 +1,9 @@
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
-import type { User } from "@db/schema";
+import type { User } from "../db/schema";
 import { authenticateRequest } from "./kimi/auth";
 import { verifyLocalToken } from "./local-auth-router";
 import { getDb } from "./queries/connection";
-import { users } from "@db/schema";
+import { users } from "../db/schema";
 import { eq } from "drizzle-orm";
 
 export type TrpcContext = {

@@ -4,7 +4,7 @@ import * as jose from "jose";
 import { TRPCError } from "@trpc/server";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { users } from "@db/schema";
+import { users } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { env } from "./lib/env";
 
