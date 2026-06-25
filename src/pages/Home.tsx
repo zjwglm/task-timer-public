@@ -208,7 +208,7 @@ export default function Home() {
                   </span>{" "}
                   <span className="text-gray-500">
                     (Interval:{" "}
-                    <span className="tabular-nums">{checkIn.interval}</span>)
+                    <span className="tabular-nums">{checkIn.intervalSeconds}</span>)
                   </span>
                 </li>
               ))}

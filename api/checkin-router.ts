@@ -60,7 +60,7 @@ export const checkInRouter = createRouter({
           userId,
           timerId: input.timerId,
           timestamp: now,
-          interval,
+          intervalSeconds: interval,
         })
         .$returningId();
 

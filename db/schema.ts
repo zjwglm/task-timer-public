@@ -48,7 +48,7 @@ export const checkIns = mysqlTable("checkIns", {
   userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
   timerId: bigint("timerId", { mode: "number", unsigned: true }).notNull(),
   timestamp: datetime("timestamp").notNull(),
-  interval: varchar("interval", { length: 20 }).notNull(),
+  intervalSeconds: varchar("intervalSeconds", { length: 20 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
