@@ -2,8 +2,14 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/providers/trpc";
 import { Button } from "@/components/ui/button";
-import { LogIn, LogOut, User, Clock, Loader2 } from "lucide-react";
+import { LogIn, LogOut, User, Clock, Loader2, Download } from "lucide-react";
 import { useNavigate } from "react-router";
+
+// PWA install prompt type
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -30,7 +36,30 @@ export default function Home() {
   const utils = trpc.useUtils();
 
   const [elapsed, setElapsed] = useState(0);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [showInstall, setShowInstall] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // PWA install prompt
+  useEffect(() => {
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+      setShowInstall(true);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === "accepted") {
+      setShowInstall(false);
+      setInstallPrompt(null);
+    }
+  };
 
   const { data: timer, isLoading: timerLoading } = trpc.timer.get.useQuery(
     undefined,
@@ -166,6 +195,19 @@ export default function Home() {
 
       {/* Main Content */}
       <div className="max-w-lg mx-auto px-4 py-8 space-y-8">
+        {/* PWA Install Button */}
+        {showInstall && (
+          <div className="text-center">
+            <button
+              onClick={handleInstall}
+              className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 bg-gray-50 hover:bg-gray-100 px-3 py-1.5 rounded-full transition-colors"
+            >
+              <Download className="w-3 h-3" />
+              Add to home screen
+            </button>
+          </div>
+        )}
+
         {/* Timer Display */}
         <div className="text-center space-y-4">
           <div className="text-4xl font-light text-gray-800 tabular-nums tracking-wide">
