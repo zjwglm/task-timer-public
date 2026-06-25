@@ -6,8 +6,34 @@ import { fileURLToPath } from "url";
 
 type App = Hono<{ Bindings: HttpBindings }>;
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const distPath = path.resolve(__dirname, "../../dist/public");
+// Try multiple possible paths for dist/public
+function findDistPath(): string | null {
+  const candidates = [
+    // Railway Docker: /app/dist/public
+    path.resolve(process.cwd(), "dist/public"),
+    // Relative to this file: ../../dist/public
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/public"),
+    // Absolute /app
+    "/app/dist/public",
+    // Current working directory
+    path.resolve("dist/public"),
+  ];
+
+  for (const p of candidates) {
+    if (fs.existsSync(p) && fs.existsSync(path.join(p, "index.html"))) {
+      console.log(`[vite] Found dist/public at: ${p}`);
+      return p;
+    }
+  }
+
+  console.error("[vite] Could not find dist/public. Checked paths:");
+  for (const p of candidates) {
+    console.error(`  - ${p} (exists: ${fs.existsSync(p)})`);
+  }
+  return null;
+}
+
+const distPath = findDistPath();
 
 // MIME type map
 const mimeTypes: Record<string, string> = {
@@ -36,6 +62,11 @@ function serveFile(c: any, filePath: string) {
 }
 
 export function serveStaticFiles(app: App) {
+  if (!distPath) {
+    app.get("/", (c) => c.json({ error: "Static files not found" }, 500));
+    return;
+  }
+
   // Serve index.html at root
   app.get("/", (c) => {
     const result = serveFile(c, path.resolve(distPath, "index.html"));
@@ -46,7 +77,7 @@ export function serveStaticFiles(app: App) {
   // Serve static files
   app.get("/*", (c) => {
     const url = new URL(c.req.url);
-    let filePath = path.resolve(distPath, "." + url.pathname);
+    const filePath = path.resolve(distPath, "." + url.pathname);
 
     // Security: ensure file is within distPath
     if (!filePath.startsWith(distPath)) {
