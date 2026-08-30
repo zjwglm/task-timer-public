@@ -7,6 +7,7 @@ import {
   timestamp,
   bigint,
   datetime,
+  boolean,
 } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
@@ -54,3 +55,19 @@ export const checkIns = mysqlTable("checkIns", {
 
 export type CheckIn = typeof checkIns.$inferSelect;
 export type InsertCheckIn = typeof checkIns.$inferInsert;
+
+export const notes = mysqlTable("notes", {
+  id: serial("id").primaryKey(),
+  userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
+  content: text("content").notNull().default(""),
+  color: varchar("color", { length: 20 }).notNull().default("yellow"),
+  archived: boolean("archived").notNull().default(false),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt")
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()),
+});
+
+export type Note = typeof notes.$inferSelect;
+export type InsertNote = typeof notes.$inferInsert;
