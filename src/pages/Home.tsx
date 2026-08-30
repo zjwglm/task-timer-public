@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/providers/trpc";
 import { Button } from "@/components/ui/button";
-import { LogIn, LogOut, User, Clock, Loader2 } from "lucide-react";
+import { LogIn, LogOut, User, Clock, Loader2, StickyNote } from "lucide-react";
 import { useNavigate } from "react-router";
 
 function formatDuration(ms: number): string {
@@ -140,7 +140,14 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-white">
       {/* Auth Bar */}
-      <div className="flex items-center justify-end px-4 py-3 border-b border-gray-100">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+        <button
+          onClick={() => navigate("/notes")}
+          className="text-sm text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-1"
+        >
+          <StickyNote className="w-3.5 h-3.5" />
+          便签
+        </button>
         <div className="flex items-center gap-3">
           {user?.avatar ? (
             <img
