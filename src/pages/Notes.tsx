@@ -223,6 +223,21 @@ function NoteCard({
   // 有本地草稿（尚未保存）时显示草稿，否则显示数据库内容
   const [value, setValue] = useState(draft ?? note.content);
 
+  // 卡片高度：可拖拽调整，记住在本设备上
+  const heightKey = `note_height_${note.id}`;
+  const [height, setHeight] = useState<number | null>(() => {
+    const saved = localStorage.getItem(heightKey);
+    return saved ? parseInt(saved, 10) : null;
+  });
+
+  const saveHeight = (el: HTMLDivElement) => {
+    const h = el.offsetHeight;
+    if (h && h !== height) {
+      setHeight(h);
+      localStorage.setItem(heightKey, String(h));
+    }
+  };
+
   // 数据库内容更新且没有未保存草稿时，同步到本地
   useEffect(() => {
     setValue((current) => (draft !== undefined ? current : note.content));
@@ -231,7 +246,14 @@ function NoteCard({
 
   return (
     <div
-      className={`${colorClass} rounded-lg shadow-sm hover:shadow-md transition-shadow p-3 flex flex-col min-h-[180px]`}
+      className={`${colorClass} rounded-lg shadow-sm hover:shadow-md transition-shadow p-3 flex flex-col resize-y overflow-auto`}
+      style={{
+        minHeight: 180,
+        height: height ?? undefined,
+        maxHeight: "80vh",
+      }}
+      onMouseUp={(e) => saveHeight(e.currentTarget)}
+      onTouchEnd={(e) => saveHeight(e.currentTarget)}
     >
       <textarea
         value={value}
