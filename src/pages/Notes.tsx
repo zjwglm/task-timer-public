@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, memo, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/providers/trpc";
 import { Button } from "@/components/ui/button";
@@ -87,6 +87,65 @@ function serializeEditor(root: HTMLElement): string {
     .join("");
 }
 
+/* ---- 便签编辑器：React 只在挂载时初始化一次，之后绝不重新渲染，
+   避免框架与浏览器富文本编辑的 DOM 冲突 ---- */
+const NoteEditor = memo(
+  function NoteEditor({
+    initialHtml,
+    onInput,
+    register,
+  }: {
+    initialHtml: string;
+    onInput: (html: string) => void;
+    register: (el: HTMLDivElement | null) => void;
+  }) {
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      const el = ref.current;
+      if (el) el.innerHTML = initialHtml;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const handleInput = () => {
+      const el = ref.current;
+      if (el) onInput(serializeEditor(el));
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+      // Ctrl+B / Cmd+B 加粗选中文字
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        document.execCommand("bold");
+        handleInput();
+      }
+    };
+
+    const handlePaste = (e: React.ClipboardEvent) => {
+      e.preventDefault();
+      const text = e.clipboardData.getData("text/plain");
+      document.execCommand("insertText", false, text);
+    };
+
+    return (
+      <div
+        ref={(el) => {
+          ref.current = el;
+          register(el);
+        }}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={handleInput}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        data-placeholder="写点什么…"
+        className="note-editor flex-1 min-h-[120px] overflow-y-auto bg-transparent border-none outline-none text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words"
+      />
+    );
+  },
+  () => true // 永不因 props 变化重新渲染，DOM 完全交给浏览器
+);
+
 export default function Notes() {
   const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
   const navigate = useNavigate();
@@ -97,6 +156,8 @@ export default function Notes() {
   // 每张便签的本地草稿和防抖计时器
   const drafts = useRef<Record<number, string>>({});
   const saveTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  // 便签 id → 编辑器 DOM 元素（用于跨设备同步时直接更新内容）
+  const editors = useRef(new Map<number, HTMLDivElement>());
 
   const { data: notes, isLoading: notesLoading } = trpc.notes.list.useQuery(
     { archived: showArchived },
@@ -114,6 +175,8 @@ export default function Notes() {
     },
     onError: () => setSaveStatus("保存失败"),
   });
+  const updateNoteRef = useRef(updateNote);
+  updateNoteRef.current = updateNote;
 
   const deleteNote = trpc.notes.delete.useMutation({
     onSuccess: () => utils.notes.list.invalidate(),
@@ -131,15 +194,30 @@ export default function Notes() {
     return () => Object.values(timers).forEach(clearTimeout);
   }, []);
 
-  const handleEdit = (id: number, content: string) => {
+  // 跨设备同步：数据变化时，直接更新未在编辑中的编辑器内容
+  useEffect(() => {
+    if (!notes) return;
+    for (const n of notes) {
+      const el = editors.current.get(n.id);
+      if (!el) continue;
+      if (document.activeElement === el) continue;
+      if (drafts.current[n.id] !== undefined) continue;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.anchorNode && el.contains(sel.anchorNode)) continue;
+      const html = toHtml(n.content);
+      if (el.innerHTML !== html) el.innerHTML = html;
+    }
+  }, [notes]);
+
+  const handleEdit = useCallback((id: number, content: string) => {
     drafts.current[id] = content;
     clearTimeout(saveTimers.current[id]);
     setSaveStatus("保存中…");
     saveTimers.current[id] = setTimeout(() => {
-      updateNote.mutate({ id, content });
+      updateNoteRef.current.mutate({ id, content });
       delete drafts.current[id];
     }, 1200);
-  };
+  }, []);
 
   const handleCreate = () => {
     const count = notes?.length ?? 0;
@@ -238,6 +316,10 @@ export default function Notes() {
                 note={note}
                 draft={drafts.current[note.id]}
                 onEdit={handleEdit}
+                registerEditor={(el) => {
+                  if (el) editors.current.set(note.id, el);
+                  else editors.current.delete(note.id);
+                }}
                 onToggleArchive={() =>
                   updateNote.mutate({ id: note.id, archived: !note.archived })
                 }
@@ -265,6 +347,7 @@ function NoteCard({
   note,
   draft,
   onEdit,
+  registerEditor,
   onToggleArchive,
   onDelete,
 }: {
@@ -277,6 +360,7 @@ function NoteCard({
   };
   draft: string | undefined;
   onEdit: (id: number, content: string) => void;
+  registerEditor: (el: HTMLDivElement | null) => void;
   onToggleArchive: () => void;
   onDelete: () => void;
 }) {
@@ -298,47 +382,13 @@ function NoteCard({
     }
   };
 
-  const editorRef = useRef<HTMLDivElement>(null);
-
-  // 初始化内容（仅一次）
-  useEffect(() => {
-    const el = editorRef.current;
-    if (el) el.innerHTML = toHtml(draft ?? note.content);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 其他设备同步来的新内容：未在编辑且没有未保存草稿时刷新显示
-  useEffect(() => {
-    const el = editorRef.current;
-    if (!el || document.activeElement === el || draft !== undefined) return;
-    // 用户正在这张卡片里选文字时也不同步覆盖，避免打断操作
-    const sel = window.getSelection();
-    if (sel && sel.anchorNode && el.contains(sel.anchorNode) && !sel.isCollapsed) return;
-    const html = toHtml(note.content);
-    if (el.innerHTML !== html) el.innerHTML = html;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note.content]);
-
-  const handleInput = () => {
-    const el = editorRef.current;
-    if (!el) return;
-    onEdit(note.id, serializeEditor(el));
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Ctrl+B / Cmd+B 加粗选中文字
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
-      e.preventDefault();
-      document.execCommand("bold");
-      handleInput();
-    }
-  };
-
-  const handlePaste = (e: React.ClipboardEvent) => {
-    e.preventDefault();
-    const text = e.clipboardData.getData("text/plain");
-    document.execCommand("insertText", false, text);
-  };
+  // 初始内容只在挂载时计算一次（之后编辑器 DOM 由浏览器接管，
+  // 跨设备同步由父组件通过 registerEditor 拿到的元素直接更新）
+  const [initialHtml] = useState(() => toHtml(draft ?? note.content));
+  const handleEditorInput = useCallback(
+    (html: string) => onEdit(note.id, html),
+    [onEdit, note.id]
+  );
 
   return (
     <div
@@ -351,15 +401,10 @@ function NoteCard({
       onMouseUp={(e) => saveHeight(e.currentTarget)}
       onTouchEnd={(e) => saveHeight(e.currentTarget)}
     >
-      <div
-        ref={editorRef}
-        contentEditable
-        suppressContentEditableWarning
-        onInput={handleInput}
-        onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
-        data-placeholder="写点什么…"
-        className="note-editor flex-1 bg-transparent border-none outline-none text-sm leading-relaxed text-gray-800 min-h-[120px] whitespace-pre-wrap break-words"
+      <NoteEditor
+        initialHtml={initialHtml}
+        onInput={handleEditorInput}
+        register={registerEditor}
       />
       <div className="flex items-center justify-between mt-2 pt-1">
         <span className="text-[11px] text-gray-500/70 tabular-nums">
