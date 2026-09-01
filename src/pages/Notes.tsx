@@ -25,6 +25,47 @@ const COLOR_STYLES: Record<NoteColor, string> = {
 
 const COLOR_ORDER: NoteColor[] = ["yellow", "green", "blue", "pink"];
 
+/* ---- 富文本（仅加粗）辅助函数 ---- */
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// 数据库里的旧内容是纯文本，新内容是（只含加粗的）HTML
+function toHtml(content: string): string {
+  if (/<\w+[^>]*>/.test(content)) return sanitizeHtml(content);
+  return escapeHtml(content).replace(/\n/g, "<br>");
+}
+
+// 只保留 <b>/<strong>/<br>/<div>，其余标签剥离但保留文字
+function sanitizeHtml(html: string): string {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  const walk = (node: Node) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const el = child as HTMLElement;
+        const tag = el.tagName.toLowerCase();
+        if (["script", "style", "iframe", "object", "embed", "img"].includes(tag)) {
+          el.remove();
+          continue;
+        }
+        walk(el);
+        if (!["b", "strong", "br", "div"].includes(tag)) {
+          el.replaceWith(...Array.from(el.childNodes));
+        } else {
+          for (const attr of Array.from(el.attributes)) el.removeAttribute(attr.name);
+        }
+      }
+    }
+  };
+  walk(tmp);
+  return tmp.innerHTML;
+}
+
 export default function Notes() {
   const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
   const navigate = useNavigate();
@@ -220,8 +261,6 @@ function NoteCard({
 }) {
   const colorClass =
     COLOR_STYLES[(note.color as NoteColor)] ?? COLOR_STYLES.yellow;
-  // 有本地草稿（尚未保存）时显示草稿，否则显示数据库内容
-  const [value, setValue] = useState(draft ?? note.content);
 
   // 卡片高度：可拖拽调整，记住在本设备上
   const heightKey = `note_height_${note.id}`;
@@ -238,11 +277,44 @@ function NoteCard({
     }
   };
 
-  // 数据库内容更新且没有未保存草稿时，同步到本地
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  // 初始化内容（仅一次）
   useEffect(() => {
-    setValue((current) => (draft !== undefined ? current : note.content));
+    const el = editorRef.current;
+    if (el) el.innerHTML = toHtml(draft ?? note.content);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 其他设备同步来的新内容：未在编辑且没有未保存草稿时刷新显示
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el || document.activeElement === el || draft !== undefined) return;
+    const html = toHtml(note.content);
+    if (el.innerHTML !== html) el.innerHTML = html;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.content]);
+
+  const handleInput = () => {
+    const el = editorRef.current;
+    if (!el) return;
+    onEdit(note.id, sanitizeHtml(el.innerHTML));
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Ctrl+B / Cmd+B 加粗选中文字
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+      e.preventDefault();
+      document.execCommand("bold");
+      handleInput();
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    document.execCommand("insertText", false, text);
+  };
 
   return (
     <div
@@ -255,14 +327,15 @@ function NoteCard({
       onMouseUp={(e) => saveHeight(e.currentTarget)}
       onTouchEnd={(e) => saveHeight(e.currentTarget)}
     >
-      <textarea
-        value={value}
-        onChange={(e) => {
-          setValue(e.target.value);
-          onEdit(note.id, e.target.value);
-        }}
-        placeholder="写点什么…"
-        className="flex-1 bg-transparent border-none resize-none outline-none text-sm leading-relaxed text-gray-800 placeholder:text-gray-400 min-h-[120px]"
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={handleInput}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        data-placeholder="写点什么…"
+        className="note-editor flex-1 bg-transparent border-none outline-none text-sm leading-relaxed text-gray-800 min-h-[120px] whitespace-pre-wrap break-words"
       />
       <div className="flex items-center justify-between mt-2 pt-1">
         <span className="text-[11px] text-gray-500/70 tabular-nums">
