@@ -1,4 +1,4 @@
-const CACHE_NAME = "task-timer-v1";
+const CACHE_NAME = "task-timer-v2";
 const urlsToCache = ["/", "/manifest.json"];
 
 self.addEventListener("install", (event) => {
