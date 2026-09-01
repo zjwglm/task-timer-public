@@ -66,6 +66,27 @@ function sanitizeHtml(html: string): string {
   return tmp.innerHTML;
 }
 
+// 严格白名单序列化：从编辑器 DOM 重建只含 文字/加粗/换行 的内容，
+// 任何意外混入编辑区的元素（按钮、时间戳等）都不会被保存
+function serializeEditor(root: HTMLElement): string {
+  const walk = (node: Node, isFirstChild: boolean): string => {
+    if (node.nodeType === Node.TEXT_NODE) return escapeHtml(node.textContent ?? "");
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const el = node as HTMLElement;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "br") return "<br>";
+    const inner = Array.from(el.childNodes)
+      .map((c, i) => walk(c, i === 0))
+      .join("");
+    if (tag === "b" || tag === "strong") return `<b>${inner}</b>`;
+    if (tag === "div") return (isFirstChild ? "" : "<br>") + inner;
+    return inner; // 其他元素只保留文字内容
+  };
+  return Array.from(root.childNodes)
+    .map((n, i) => walk(n, i === 0))
+    .join("");
+}
+
 export default function Notes() {
   const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
   const navigate = useNavigate();
@@ -290,6 +311,9 @@ function NoteCard({
   useEffect(() => {
     const el = editorRef.current;
     if (!el || document.activeElement === el || draft !== undefined) return;
+    // 用户正在这张卡片里选文字时也不同步覆盖，避免打断操作
+    const sel = window.getSelection();
+    if (sel && sel.anchorNode && el.contains(sel.anchorNode) && !sel.isCollapsed) return;
     const html = toHtml(note.content);
     if (el.innerHTML !== html) el.innerHTML = html;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -298,7 +322,7 @@ function NoteCard({
   const handleInput = () => {
     const el = editorRef.current;
     if (!el) return;
-    onEdit(note.id, sanitizeHtml(el.innerHTML));
+    onEdit(note.id, serializeEditor(el));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
