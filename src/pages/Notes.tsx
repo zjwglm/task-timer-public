@@ -11,6 +11,7 @@ import {
   Trash2,
   Clock,
   User,
+  RefreshCw,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 
@@ -177,10 +178,12 @@ export default function Notes() {
   const saveTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   // 便签 id → 编辑器 DOM 元素（用于跨设备同步时直接更新内容）
   const editors = useRef(new Map<number, HTMLDivElement>());
+  // 每张便签最近一次确认与云端一致的内容（避免重复写入 DOM）
+  const lastSynced = useRef<Record<number, string>>({});
 
   const { data: notes, isLoading: notesLoading } = trpc.notes.list.useQuery(
     { archived: showArchived },
-    { enabled: isAuthenticated, refetchInterval: 30000 }
+    { enabled: isAuthenticated, refetchInterval: 10000 }
   );
 
   const createNote = trpc.notes.create.useMutation({
@@ -207,6 +210,34 @@ export default function Notes() {
     return () => clearTimeout(t);
   }, [saveStatus]);
 
+  // 某张便签是否有"尚未送达云端"的本地修改
+  const hasPending = (id: number) =>
+    drafts.current[id] !== undefined || saveTimers.current[id] !== undefined;
+
+  // 立刻把所有待保存的修改发出去（切走页面/关闭页面时调用，不再等防抖）
+  const flushPendingSaves = useCallback(() => {
+    for (const idStr of Object.keys(saveTimers.current)) {
+      const id = Number(idStr);
+      clearTimeout(saveTimers.current[id]);
+      delete saveTimers.current[id];
+      const content = drafts.current[id];
+      if (content !== undefined) {
+        updateNoteRef.current.mutate({ id, content });
+        delete drafts.current[id];
+      }
+    }
+  }, []);
+
+  // 从云端拉取最新数据（先冲刷本地待保存内容，再拉取）
+  const syncFromCloud = useCallback(() => {
+    flushPendingSaves();
+    utils.notes.list
+      .invalidate()
+      .then(() => setSaveStatus("已从云端同步"))
+      .catch(() => setSaveStatus("同步失败"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flushPendingSaves]);
+
   // 卸载时清除所有防抖计时器
   useEffect(() => {
     const timers = saveTimers.current;
@@ -222,47 +253,58 @@ export default function Notes() {
     }
   }, [notesLoading, notes]);
 
-  // 页面变为活动状态（切回标签页/PWA 窗口获得焦点）时，自动从云端拉取最新数据
+  // 页面变为活动状态（切回标签页/PWA 窗口获得焦点）时，自动从云端拉取最新数据；
+  // 页面被切走/关闭时，立刻把未保存的修改发出去
   useEffect(() => {
-    const sync = () => {
-      if (document.visibilityState !== "visible") return;
-      // 本地有未保存的输入时先不拉取，等保存完成后再同步
-      if (Object.keys(drafts.current).length > 0) return;
-      utils.notes.list
-        .invalidate()
-        .then(() => setSaveStatus("已从云端同步"))
-        .catch(() => setSaveStatus("同步失败"));
+    const onVisible = () => {
+      if (document.visibilityState === "visible") syncFromCloud();
     };
-    document.addEventListener("visibilitychange", sync);
-    window.addEventListener("focus", sync);
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") flushPendingSaves();
+    };
+    const onPageHide = () => flushPendingSaves();
+    document.addEventListener("visibilitychange", onVisible);
+    document.addEventListener("visibilitychange", onHidden);
+    window.addEventListener("focus", syncFromCloud);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
-      document.removeEventListener("visibilitychange", sync);
-      window.removeEventListener("focus", sync);
+      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("visibilitychange", onHidden);
+      window.removeEventListener("focus", syncFromCloud);
+      window.removeEventListener("pagehide", onPageHide);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [syncFromCloud, flushPendingSaves]);
 
-  // 跨设备同步：数据变化时，直接更新未在编辑中的编辑器内容
+  // 跨设备同步：数据变化时，直接更新编辑器内容。
+  // 唯一跳过条件：这张便签有"还没送达云端"的本地修改（避免覆盖正在输入的内容）。
+  // 注意：不再因为"光标在便签里"而跳过——否则只要点过某张便签，
+  // 焦点滞留会导致它永远收不到其他设备的更新。
   useEffect(() => {
     if (!notes) return;
     for (const n of notes) {
       const el = editors.current.get(n.id);
       if (!el) continue;
-      if (document.activeElement === el) continue;
-      if (drafts.current[n.id] !== undefined) continue;
-      const sel = window.getSelection();
-      if (sel && !sel.isCollapsed && sel.anchorNode && el.contains(sel.anchorNode)) continue;
-      // 用规范文本格式对比，避免浏览器 innerHTML 序列化差异导致漏判
-      if (serializeEditor(el) !== n.content) el.innerHTML = toHtml(n.content);
+      if (hasPending(n.id)) continue;
+      if (lastSynced.current[n.id] === n.content) continue;
+      // 双保险：编辑器当前序列化结果与云端一致时也无需触碰 DOM
+      if (serializeEditor(el) === n.content) {
+        lastSynced.current[n.id] = n.content;
+        continue;
+      }
+      el.innerHTML = toHtml(n.content);
+      lastSynced.current[n.id] = n.content;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notes]);
 
   const handleEdit = useCallback((id: number, content: string) => {
     drafts.current[id] = content;
     clearTimeout(saveTimers.current[id]);
     saveTimers.current[id] = setTimeout(() => {
-      updateNoteRef.current.mutate({ id, content });
+      delete saveTimers.current[id];
+      const c = drafts.current[id];
       delete drafts.current[id];
+      if (c !== undefined) updateNoteRef.current.mutate({ id, content: c });
     }, 1200);
   }, []);
 
@@ -315,6 +357,13 @@ export default function Notes() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-gray-400">{saveStatus}</span>
+          <button
+            onClick={syncFromCloud}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+            title="立即从云端同步"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
           {user?.avatar ? (
             <img src={user.avatar} alt="" className="w-7 h-7 rounded-full object-cover" />
           ) : (
@@ -364,8 +413,13 @@ export default function Notes() {
                 draft={drafts.current[note.id]}
                 onEdit={handleEdit}
                 registerEditor={(el) => {
-                  if (el) editors.current.set(note.id, el);
-                  else editors.current.delete(note.id);
+                  if (el) {
+                    editors.current.set(note.id, el);
+                    lastSynced.current[note.id] = note.content;
+                  } else {
+                    editors.current.delete(note.id);
+                    delete lastSynced.current[note.id];
+                  }
                 }}
                 onToggleArchive={() =>
                   updateNote.mutate({ id: note.id, archived: !note.archived })
