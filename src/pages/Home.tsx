@@ -44,18 +44,32 @@ export default function Home() {
     onSuccess: () => utils.timer.get.invalidate(),
   });
 
+  const [saveStatus, setSaveStatus] = useState("");
+
   const createCheckIn = trpc.checkIn.create.useMutation({
     onSuccess: () => {
       utils.checkIn.list.invalidate();
+      setSaveStatus("已保存");
     },
+    onError: () => setSaveStatus("保存失败"),
   });
+
+  useEffect(() => {
+    if (!saveStatus) return;
+    const t = setTimeout(() => setSaveStatus(""), 2000);
+    return () => clearTimeout(t);
+  }, [saveStatus]);
 
   // 页面变为活动状态时，自动从云端拉取最新打卡数据
   useEffect(() => {
     const sync = () => {
       if (document.visibilityState !== "visible") return;
-      utils.checkIn.list.invalidate();
-      utils.timer.get.invalidate();
+      Promise.all([
+        utils.checkIn.list.invalidate(),
+        utils.timer.get.invalidate(),
+      ])
+        .then(() => setSaveStatus("已从云端同步"))
+        .catch(() => setSaveStatus("同步失败"));
     };
     document.addEventListener("visibilitychange", sync);
     window.addEventListener("focus", sync);
@@ -165,6 +179,7 @@ export default function Home() {
           便签
         </button>
         <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-400">{saveStatus}</span>
           {user?.avatar ? (
             <img
               src={user.avatar}

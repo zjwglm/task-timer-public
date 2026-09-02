@@ -203,7 +203,7 @@ export default function Notes() {
 
   useEffect(() => {
     if (!saveStatus) return;
-    const t = setTimeout(() => setSaveStatus(""), 3500);
+    const t = setTimeout(() => setSaveStatus(""), 2000);
     return () => clearTimeout(t);
   }, [saveStatus]);
 
