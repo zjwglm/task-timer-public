@@ -13,6 +13,8 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
+      // 查询也走 POST，避免 GET 请求被浏览器/中间节点缓存导致同步到旧数据
+      method: "POST",
       headers() {
         const token = localStorage.getItem("local_auth_token");
         return token ? { "X-Local-Auth-Token": `local_${token}` } : {};
