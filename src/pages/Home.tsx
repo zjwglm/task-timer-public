@@ -38,7 +38,7 @@ export default function Home() {
   );
 
   const { data: checkIns, isLoading: checkInsLoading } =
-    trpc.checkIn.list.useQuery(undefined, { enabled: isAuthenticated });
+    trpc.checkIn.list.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 30000 });
 
   const createTimer = trpc.timer.create.useMutation({
     onSuccess: () => utils.timer.get.invalidate(),
@@ -49,6 +49,22 @@ export default function Home() {
       utils.checkIn.list.invalidate();
     },
   });
+
+  // 页面变为活动状态时，自动从云端拉取最新打卡数据
+  useEffect(() => {
+    const sync = () => {
+      if (document.visibilityState !== "visible") return;
+      utils.checkIn.list.invalidate();
+      utils.timer.get.invalidate();
+    };
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Timer tick effect
   useEffect(() => {

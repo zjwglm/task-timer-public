@@ -34,10 +34,14 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
-// 数据库里的旧内容是纯文本，新内容是（只含加粗的）HTML
+// 数据库内容格式：
+//   新格式 = 纯文本（\n 换行，**文字** 表示加粗）
+//   旧格式 = HTML 片段（<b>/<br>/<div>），早期版本写入，读取时兼容
 function toHtml(content: string): string {
-  if (/<\w+[^>]*>/.test(content)) return sanitizeHtml(content);
-  return escapeHtml(content).replace(/\n/g, "<br>");
+  if (/<(?:b|br|div|strong)(?:\s|\/|>)/i.test(content)) return sanitizeHtml(content);
+  return escapeHtml(content)
+    .replace(/\n/g, "<br>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
 }
 
 // 只保留 <b>/<strong>/<br>/<div>，其余标签剥离但保留文字
@@ -66,20 +70,21 @@ function sanitizeHtml(html: string): string {
   return tmp.innerHTML;
 }
 
-// 严格白名单序列化：从编辑器 DOM 重建只含 文字/加粗/换行 的内容，
-// 任何意外混入编辑区的元素（按钮、时间戳等）都不会被保存
+// 序列化为纯文本存储格式：\n 换行，**文字** 表示加粗。
+// 任何意外混入编辑区的元素（按钮、时间戳等）都不会被保存；
+// 浏览器对 <br>/<div> 的各种结构差异在这里被统一消解
 function serializeEditor(root: HTMLElement): string {
   const walk = (node: Node, isFirstChild: boolean): string => {
-    if (node.nodeType === Node.TEXT_NODE) return escapeHtml(node.textContent ?? "");
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
     const el = node as HTMLElement;
     const tag = el.tagName.toLowerCase();
-    if (tag === "br") return "<br>";
+    if (tag === "br") return "\n";
     if (tag === "b" || tag === "strong") {
       const inner = Array.from(el.childNodes)
         .map((c, i) => walk(c, i === 0))
         .join("");
-      return `<b>${inner}</b>`;
+      return `**${inner}**`;
     }
     if (tag === "div") {
       // Chrome 会在行尾 div 里塞一个多余的 <br>（bogus br），剥掉避免产生空行
@@ -89,7 +94,7 @@ function serializeEditor(root: HTMLElement): string {
         kids.pop();
       }
       const inner = kids.map((c, i) => walk(c, i === 0)).join("");
-      return (isFirstChild ? "" : "<br>") + inner;
+      return (isFirstChild ? "" : "\n") + inner;
     }
     // 其他元素只保留文字内容
     return Array.from(el.childNodes)
@@ -175,7 +180,7 @@ export default function Notes() {
 
   const { data: notes, isLoading: notesLoading } = trpc.notes.list.useQuery(
     { archived: showArchived },
-    { enabled: isAuthenticated }
+    { enabled: isAuthenticated, refetchInterval: 30000 }
   );
 
   const createNote = trpc.notes.create.useMutation({
@@ -198,7 +203,7 @@ export default function Notes() {
 
   useEffect(() => {
     if (!saveStatus) return;
-    const t = setTimeout(() => setSaveStatus(""), 2000);
+    const t = setTimeout(() => setSaveStatus(""), 3500);
     return () => clearTimeout(t);
   }, [saveStatus]);
 
