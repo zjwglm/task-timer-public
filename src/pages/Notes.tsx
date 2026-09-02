@@ -75,12 +75,26 @@ function serializeEditor(root: HTMLElement): string {
     const el = node as HTMLElement;
     const tag = el.tagName.toLowerCase();
     if (tag === "br") return "<br>";
-    const inner = Array.from(el.childNodes)
+    if (tag === "b" || tag === "strong") {
+      const inner = Array.from(el.childNodes)
+        .map((c, i) => walk(c, i === 0))
+        .join("");
+      return `<b>${inner}</b>`;
+    }
+    if (tag === "div") {
+      // Chrome 会在行尾 div 里塞一个多余的 <br>（bogus br），剥掉避免产生空行
+      const kids = Array.from(el.childNodes);
+      const last = kids[kids.length - 1];
+      if (last && last.nodeType === Node.ELEMENT_NODE && (last as HTMLElement).tagName === "BR") {
+        kids.pop();
+      }
+      const inner = kids.map((c, i) => walk(c, i === 0)).join("");
+      return (isFirstChild ? "" : "<br>") + inner;
+    }
+    // 其他元素只保留文字内容
+    return Array.from(el.childNodes)
       .map((c, i) => walk(c, i === 0))
       .join("");
-    if (tag === "b" || tag === "strong") return `<b>${inner}</b>`;
-    if (tag === "div") return (isFirstChild ? "" : "<br>") + inner;
-    return inner; // 其他元素只保留文字内容
   };
   return Array.from(root.childNodes)
     .map((n, i) => walk(n, i === 0))
@@ -194,6 +208,26 @@ export default function Notes() {
     return () => Object.values(timers).forEach(clearTimeout);
   }, []);
 
+  // 页面变为活动状态（切回标签页/PWA 窗口获得焦点）时，自动从云端拉取最新数据
+  useEffect(() => {
+    const sync = () => {
+      if (document.visibilityState !== "visible") return;
+      // 本地有未保存的输入时先不拉取，等保存完成后再同步
+      if (Object.keys(drafts.current).length > 0) return;
+      utils.notes.list
+        .invalidate()
+        .then(() => setSaveStatus("已从云端同步"))
+        .catch(() => setSaveStatus("同步失败"));
+    };
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 跨设备同步：数据变化时，直接更新未在编辑中的编辑器内容
   useEffect(() => {
     if (!notes) return;
@@ -212,7 +246,6 @@ export default function Notes() {
   const handleEdit = useCallback((id: number, content: string) => {
     drafts.current[id] = content;
     clearTimeout(saveTimers.current[id]);
-    setSaveStatus("保存中…");
     saveTimers.current[id] = setTimeout(() => {
       updateNoteRef.current.mutate({ id, content });
       delete drafts.current[id];
