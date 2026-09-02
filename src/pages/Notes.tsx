@@ -203,7 +203,7 @@ export default function Notes() {
 
   useEffect(() => {
     if (!saveStatus) return;
-    const t = setTimeout(() => setSaveStatus(""), 2000);
+    const t = setTimeout(() => setSaveStatus(""), 500);
     return () => clearTimeout(t);
   }, [saveStatus]);
 
@@ -252,8 +252,8 @@ export default function Notes() {
       if (drafts.current[n.id] !== undefined) continue;
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed && sel.anchorNode && el.contains(sel.anchorNode)) continue;
-      const html = toHtml(n.content);
-      if (el.innerHTML !== html) el.innerHTML = html;
+      // 用规范文本格式对比，避免浏览器 innerHTML 序列化差异导致漏判
+      if (serializeEditor(el) !== n.content) el.innerHTML = toHtml(n.content);
     }
   }, [notes]);
 

@@ -56,7 +56,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!saveStatus) return;
-    const t = setTimeout(() => setSaveStatus(""), 2000);
+    const t = setTimeout(() => setSaveStatus(""), 500);
     return () => clearTimeout(t);
   }, [saveStatus]);
 
