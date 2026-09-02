@@ -60,6 +60,15 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [saveStatus]);
 
+  // 首次打开页面：数据加载完成后提示一次
+  const firstLoadDone = useRef(false);
+  useEffect(() => {
+    if (!firstLoadDone.current && !checkInsLoading && checkIns) {
+      firstLoadDone.current = true;
+      setSaveStatus("已从云端同步");
+    }
+  }, [checkInsLoading, checkIns]);
+
   // 页面变为活动状态时，自动从云端拉取最新打卡数据
   useEffect(() => {
     const sync = () => {

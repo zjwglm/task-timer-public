@@ -213,6 +213,15 @@ export default function Notes() {
     return () => Object.values(timers).forEach(clearTimeout);
   }, []);
 
+  // 首次打开页面：数据加载完成后提示一次
+  const firstLoadDone = useRef(false);
+  useEffect(() => {
+    if (!firstLoadDone.current && !notesLoading && notes) {
+      firstLoadDone.current = true;
+      setSaveStatus("已从云端同步");
+    }
+  }, [notesLoading, notes]);
+
   // 页面变为活动状态（切回标签页/PWA 窗口获得焦点）时，自动从云端拉取最新数据
   useEffect(() => {
     const sync = () => {
