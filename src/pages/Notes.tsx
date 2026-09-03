@@ -88,10 +88,23 @@ function serializeEditor(root: HTMLElement): string {
       return `**${inner}**`;
     }
     if (tag === "div") {
-      // Chrome 会在行尾 div 里塞一个多余的 <br>（bogus br），剥掉避免产生空行
+      // Chrome 的 bogus br：div 开头和结尾的 <br> 都是结构性垃圾。
+      // 结尾的 <br> 是行尾占位符；开头的 <br> 出现在"中间回车"时
+      // （Chrome 会把后续内容包进一个以 <br> 开头的 div），
+      // 不剥掉的话每次编辑都会在回车位置多出一个空行。
       const kids = Array.from(el.childNodes);
-      const last = kids[kids.length - 1];
-      if (last && last.nodeType === Node.ELEMENT_NODE && (last as HTMLElement).tagName === "BR") {
+      while (
+        kids.length > 0 &&
+        kids[0].nodeType === Node.ELEMENT_NODE &&
+        (kids[0] as HTMLElement).tagName === "BR"
+      ) {
+        kids.shift();
+      }
+      while (
+        kids.length > 0 &&
+        kids[kids.length - 1].nodeType === Node.ELEMENT_NODE &&
+        (kids[kids.length - 1] as HTMLElement).tagName === "BR"
+      ) {
         kids.pop();
       }
       const inner = kids.map((c, i) => walk(c, i === 0)).join("");
