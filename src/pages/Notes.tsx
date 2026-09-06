@@ -190,10 +190,6 @@ const NoteEditor = memo(
       // 统一换行符：Windows/Word 的剪贴板常带 \r\n，手机 Chrome 会把 textNode
       // 里的 \r 也当成换行渲染，导致每行后面多出一个空行。先全部清理掉 \r。
       const text = e.clipboardData.getData("text/plain").replace(/\r/g, "");
-      // 不再用 document.execCommand("insertText")，它在处理换行符时
-      e.preventDefault();
-      const text = e.clipboardData.getData("text/plain");
-      // 不再用 document.execCommand("insertText")，它在处理换行符时
       // 不同浏览器行为不一致（手机 Chrome 会插入多余的 <div><br></div>），
       // 导致 serializeEditor 序列化后多出空行。改为手动构建 DOM：
       // 按换行符分割，行间插入 <br>，与 toHtml 的行为保持一致。
