@@ -76,7 +76,7 @@ function sanitizeHtml(html: string): string {
 // 浏览器对 <br>/<div> 的各种结构差异在这里被统一消解
 function serializeEditor(root: HTMLElement): string {
   const walk = (node: Node, isFirstChild: boolean): string => {
-    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+    if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? "").replace(/\r/g, "");
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
     const el = node as HTMLElement;
     const tag = el.tagName.toLowerCase();
@@ -92,7 +92,38 @@ function serializeEditor(root: HTMLElement): string {
       // 结尾的 <br> 是行尾占位符；开头的 <br> 出现在"中间回车"时
       // （Chrome 会把后续内容包进一个以 <br> 开头的 div），
       // 不剥掉的话每次编辑都会在回车位置多出一个空行。
-      const kids = Array.from(el.childNodes);
+      //
+      // 关键：某些浏览器/输入法会先把 <br> 包在 <span> 等内联元素里
+      // （如 <div><span><br></span></div>），只检查 div 的直接子节点
+      // 会漏掉这些 bogus br，导致序列化后多出换行。因此先把 span、font
+      // 等非白名单内联元素扁平化展开，再统一剥除首尾 BR。
+      const flatten = (nodes: Node[]): Node[] => {
+        const result: Node[] = [];
+        for (const node of nodes) {
+          if (node.nodeType === Node.TEXT_NODE) {
+            result.push(node);
+            continue;
+          }
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          const childEl = node as HTMLElement;
+          const childTag = childEl.tagName.toLowerCase();
+          // 白名单元素保持原状；div 也保持（由外层递归处理）
+          if (
+            childTag === "br" ||
+            childTag === "b" ||
+            childTag === "strong" ||
+            childTag === "div"
+          ) {
+            result.push(node);
+          } else {
+            // 其他元素（span, font, a 等）展开，只保留内部有效内容
+            result.push(...flatten(Array.from(childEl.childNodes)));
+          }
+        }
+        return result;
+      };
+
+      const kids = flatten(Array.from(el.childNodes));
       while (
         kids.length > 0 &&
         kids[0].nodeType === Node.ELEMENT_NODE &&
@@ -156,8 +187,37 @@ const NoteEditor = memo(
 
     const handlePaste = (e: React.ClipboardEvent) => {
       e.preventDefault();
+      // 统一换行符：Windows/Word 的剪贴板常带 \r\n，手机 Chrome 会把 textNode
+      // 里的 \r 也当成换行渲染，导致每行后面多出一个空行。先全部清理掉 \r。
+      const text = e.clipboardData.getData("text/plain").replace(/\r/g, "");
+      // 不再用 document.execCommand("insertText")，它在处理换行符时
+      e.preventDefault();
       const text = e.clipboardData.getData("text/plain");
-      document.execCommand("insertText", false, text);
+      // 不再用 document.execCommand("insertText")，它在处理换行符时
+      // 不同浏览器行为不一致（手机 Chrome 会插入多余的 <div><br></div>），
+      // 导致 serializeEditor 序列化后多出空行。改为手动构建 DOM：
+      // 按换行符分割，行间插入 <br>，与 toHtml 的行为保持一致。
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      const lines = text.split("\n");
+      const fragment = document.createDocumentFragment();
+      lines.forEach((line, index) => {
+        if (index > 0) {
+          fragment.appendChild(document.createElement("br"));
+        }
+        if (line) {
+          fragment.appendChild(document.createTextNode(line));
+        }
+      });
+      range.insertNode(fragment);
+      // 把光标移到插入内容末尾，并触发 input 事件让 serializeEditor 工作
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      // 手动触发一次序列化（因为 insertNode 不会自动触发 onInput）
+      handleInput();
     };
 
     return (
