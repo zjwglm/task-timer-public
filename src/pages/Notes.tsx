@@ -235,7 +235,10 @@ const NoteEditor = memo(
   () => true // 永不因 props 变化重新渲染，DOM 完全交给浏览器
 );
 
-export default function Notes() {
+// embedded=true 时作为打卡页左侧的嵌入面板渲染：
+// 不渲染自己的顶栏（用户头像/退出/去打卡按钮由打卡页统一提供），
+// 只保留"便签"标题、同步状态提示和手动刷新按钮。
+export default function Notes({ embedded = false }: { embedded?: boolean }) {
   const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
   const navigate = useNavigate();
   const utils = trpc.useUtils();
@@ -389,6 +392,16 @@ export default function Notes() {
 
   // 未登录
   if (!isAuthenticated && !authLoading) {
+    if (embedded) {
+      return (
+        <div className="flex flex-col items-center justify-center px-4 py-16">
+          <p className="text-gray-500 text-sm mb-4">登录后同步你的便签</p>
+          <Button size="sm" onClick={() => navigate("/login")}>
+            去登录
+          </Button>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-4">
         <div className="text-center space-y-6">
@@ -404,15 +417,36 @@ export default function Notes() {
 
   if (authLoading || notesLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div
+        className={
+          embedded
+            ? "flex justify-center py-16"
+            : "min-h-screen flex items-center justify-center"
+        }
+      >
         <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* 顶栏 */}
+    <div className={embedded ? "bg-gray-50 min-h-full" : "min-h-screen bg-gray-50"}>
+      {/* 顶栏：嵌入模式下只保留标题 + 同步状态 + 刷新按钮 */}
+      {embedded ? (
+        <div className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur px-4 py-2 flex items-center justify-between border-b border-gray-200/60">
+          <h1 className="text-sm font-medium text-gray-700">便签</h1>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-400">{saveStatus}</span>
+            <button
+              onClick={syncFromCloud}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+              title="立即从云端同步"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      ) : (
       <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <h1 className="text-base font-medium text-gray-800">便签</h1>
@@ -450,8 +484,9 @@ export default function Notes() {
           </button>
         </div>
       </div>
+      )}
 
-      <div className="max-w-4xl mx-auto px-4 py-6">
+      <div className={embedded ? "px-4 py-4" : "max-w-4xl mx-auto px-4 py-6"}>
         {/* 工具栏 */}
         <div className="flex items-center gap-3 mb-5">
           <Button onClick={handleCreate} disabled={createNote.isPending} size="sm">
@@ -472,9 +507,15 @@ export default function Notes() {
           <span className="text-xs text-gray-400 ml-auto">{noteCountLabel}</span>
         </div>
 
-        {/* 便签网格 */}
+        {/* 便签网格：嵌入模式（半屏宽）用 1~2 列，独立页面保持 1~3 列 */}
         {notes && notes.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div
+            className={
+              embedded
+                ? "grid grid-cols-1 xl:grid-cols-2 gap-4"
+                : "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+            }
+          >
             {notes.map((note) => (
               <NoteCard
                 key={note.id}
